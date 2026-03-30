@@ -1,0 +1,7 @@
+pandas
+openpyxl
+requests
+python-dotenv
+
+google-genai
+pydantic
