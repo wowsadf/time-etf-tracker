@@ -124,7 +124,7 @@ def main() -> None:
 
         previous_snapshot_path = Path(last_snapshot_path_str) if last_snapshot_path_str else None
 
-        saved_path = save_snapshot(df)
+        saved_path = save_snapshot(df, snapshot_date=now_kst_iso()[:10])
 
         state["last_snapshot_hash"] = snapshot_hash
         state["last_snapshot_path"] = str(saved_path)

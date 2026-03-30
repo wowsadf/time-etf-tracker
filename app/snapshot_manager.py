@@ -24,14 +24,17 @@ def compute_snapshot_hash(df: pd.DataFrame) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def make_snapshot_filename() -> str:
+def make_snapshot_filename(snapshot_date: str | None = None) -> str:
+    if snapshot_date:
+        return f"{snapshot_date}.csv"
+
     now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
-    return now_kst.strftime("%Y%m%d_%H%M%S_KST.csv")
+    return now_kst.strftime("%Y-%m-%d.csv")
 
 
-def save_snapshot(df: pd.DataFrame) -> Path:
+def save_snapshot(df: pd.DataFrame, snapshot_date: str | None = None) -> Path:
     SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-    file_name = make_snapshot_filename()
+    file_name = make_snapshot_filename(snapshot_date)
     path = SNAPSHOTS_DIR / file_name
     df.to_csv(path, index=False, encoding="utf-8-sig")
     return path
