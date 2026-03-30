@@ -1,0 +1,91 @@
+name: TIME ETF Tracker
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */4 * * *"
+      timezone: "Asia/Seoul"
+
+jobs:
+  run-tracker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: time-etf-tracker
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create runtime directories
+        run: |
+          mkdir -p snapshots
+          mkdir -p state
+          mkdir -p temp
+
+      - name: Restore previous runtime state
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            snapshots
+            state
+            temp
+          key: runtime-${{ github.ref_name }}-latest
+          restore-keys: |
+            runtime-${{ github.ref_name }}-
+
+      - name: Run tracker once
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ETF_DOWNLOAD_URL: "https://timeetf.co.kr/pdf_excel.php?idx=2&"
+          REPORT_TITLE: "TIME 미국나스닥100 액티브 구성종목 변화"
+          EMAIL_SUBJECT_PREFIX: "[ETF]"
+          GEMINI_MODEL: "gemini-3-flash-preview"
+          GEMINI_FALLBACK_MODEL: "gemini-3.1-flash-lite-preview"
+          DOWNLOAD_TIMEOUT_SEC: "30"
+          DOWNLOAD_MAX_RETRIES: "3"
+        run: |
+          python app/run_tracker_once.py
+
+      - name: Save runtime state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            snapshots
+            state
+            temp
+          key: runtime-${{ github.ref_name }}-latest-${{ github.run_id }}
+
+      - name: Upload debug artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracker-debug-files
+          path: |
+            state
+            temp
+            snapshots
+          if-no-files-found: ignore
