@@ -49,17 +49,6 @@ jobs:
           mkdir -p state
           mkdir -p temp
 
-      - name: Restore previous runtime state
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            snapshots
-            state
-            temp
-          key: runtime-${{ github.ref_name }}-latest
-          restore-keys: |
-            runtime-${{ github.ref_name }}-
-
       - name: Run tracker once
         env:
           SMTP_USER: ${{ secrets.SMTP_USER }}
@@ -75,16 +64,6 @@ jobs:
           DOWNLOAD_MAX_RETRIES: "3"
         run: |
           python app/run_tracker_once.py
-
-      - name: Save runtime state
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            snapshots
-            state
-            temp
-          key: runtime-${{ github.ref_name }}-latest-${{ github.run_id }}
 
       - name: Commit updated snapshots and state
         if: always()
