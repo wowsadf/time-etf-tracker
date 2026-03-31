@@ -1,13 +1,16 @@
 {
-  "last_attempt_status": "manual_baseline_set",
-  "last_attempt_message": "3/30 스냅샷을 직전 정상 기준점으로 수동 설정",
-  "last_snapshot_hash": "6b260ac3174b262e1f86b05a5abfdb25ce0a1a45500123b343d3420acb515a35",
-  "last_snapshot_path": "snapshots/2026-03-30.csv",
-  "last_snapshot_saved_at": "2026-03-31T00:00:00+09:00",
+  "last_attempt_status": "duplicate_valid_snapshot",
+  "last_attempt_message": "직전 유효 스냅샷과 내용이 동일합니다",
+  "last_snapshot_hash": "1cafa28275cb75dea5cfdf53e88def0fae93b632a935a267dc64708e14019e73",
+  "last_snapshot_path": "/home/runner/work/time-etf-tracker/time-etf-tracker/snapshots/2026-03-31.csv",
+  "last_snapshot_saved_at": "2026-03-31T08:53:56+09:00",
   "last_reported_hash": null,
   "last_reported_snapshot_path": null,
   "last_reported_at": null,
   "pending_report_hash": null,
   "pending_snapshot_path": null,
-  "pending_previous_snapshot_path": null
+  "pending_previous_snapshot_path": null,
+  "last_success_hash": null,
+  "last_success_snapshot": null,
+  "last_success_saved_at": null
 }
