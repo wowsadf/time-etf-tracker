@@ -1,6 +1,6 @@
 {
-  "last_attempt_status": "empty_template",
-  "last_attempt_message": "헤더만 있고 실제 구성종목 데이터가 없습니다",
+  "last_attempt_status": "error",
+  "last_attempt_message": "엑셀 다운로드 실패: HTTPSConnectionPool(host='timeetf.co.kr', port=443): Max retries exceeded with url: /pdf_excel.php?idx=2& (Caused by ConnectTimeoutError(<HTTPSConnection(host='timeetf.co.kr', port=443) at 0x7f4ab6761d10>, 'Connection to timeetf.co.kr timed out. (connect timeout=30)'))",
   "last_snapshot_hash": "4529083ab14c307e0bbb39b0e883114c515f63122acb8b5d4a58063d87e3fcaa",
   "last_snapshot_path": "/home/runner/work/time-etf-tracker/time-etf-tracker/snapshots/2026-04-30.csv",
   "last_snapshot_saved_at": "2026-04-30T09:06:44+09:00",
