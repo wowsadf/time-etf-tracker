@@ -1,6 +1,6 @@
 {
-  "last_attempt_status": "reported",
-  "last_attempt_message": "새 유효 스냅샷 비교 및 이메일 발송 완료",
+  "last_attempt_status": "duplicate_valid_snapshot",
+  "last_attempt_message": "직전 유효 스냅샷과 내용이 동일합니다",
   "last_snapshot_hash": "da2d52f008f5d903a722540339064e42fc3b2aaa628b6e82a5f399a0f6c9789d",
   "last_snapshot_path": "/home/runner/work/time-etf-tracker/time-etf-tracker/snapshots/2026-05-21.csv",
   "last_snapshot_saved_at": "2026-05-21T09:17:50+09:00",
