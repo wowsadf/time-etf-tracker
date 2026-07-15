@@ -1,6 +1,6 @@
 {
-  "last_attempt_status": "duplicate_valid_snapshot",
-  "last_attempt_message": "직전 유효 스냅샷과 내용이 동일합니다",
+  "last_attempt_status": "empty_template",
+  "last_attempt_message": "헤더만 있고 실제 구성종목 데이터가 없습니다",
   "last_snapshot_hash": "ef57a4def4dcf1a99a99416c06ae06c23734802f934917a79b8ffe97fd75b773",
   "last_snapshot_path": "/home/runner/work/time-etf-tracker/time-etf-tracker/snapshots/2026-07-15.csv",
   "last_snapshot_saved_at": "2026-07-15T09:03:46+09:00",
