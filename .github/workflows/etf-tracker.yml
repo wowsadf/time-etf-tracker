@@ -21,6 +21,7 @@ jobs:
 
     steps:
       - name: Checkout repository
+        id: checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: true
@@ -49,6 +50,10 @@ jobs:
           mkdir -p state
           mkdir -p temp
 
+      - name: Run offline tests
+        run: |
+          python -m unittest discover -s tests -v
+
       - name: Run tracker once
         env:
           SMTP_USER: ${{ secrets.SMTP_USER }}
@@ -58,15 +63,15 @@ jobs:
           ETF_DOWNLOAD_URL: "https://timeetf.co.kr/pdf_excel.php?idx=2&"
           REPORT_TITLE: "TIME 미국나스닥100 액티브 구성종목 변화"
           EMAIL_SUBJECT_PREFIX: "[ETF]"
-          GEMINI_MODEL: "gemini-3-flash-preview"
-          GEMINI_FALLBACK_MODEL: "gemini-3.1-flash-lite-preview"
+          GEMINI_MODEL: "gemini-3.6-flash"
+          GEMINI_FALLBACK_MODEL: "gemini-3.5-flash-lite"
           DOWNLOAD_TIMEOUT_SEC: "30"
           DOWNLOAD_MAX_RETRIES: "3"
         run: |
           python app/run_tracker_once.py
 
       - name: Commit updated snapshots and state
-        if: always()
+        if: always() && steps.checkout.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -90,3 +95,4 @@ jobs:
             temp
             snapshots
           if-no-files-found: ignore
+          retention-days: 7

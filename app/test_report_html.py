@@ -1,17 +1,30 @@
 from __future__ import annotations
 
+import argparse
 import json
+from pathlib import Path
 
 import pandas as pd
 
 from compare import compare_holdings
-from paths import ROOT_DIR, SNAPSHOTS_DIR
+from paths import ROOT_DIR
 from reporter import build_compare_report_html
+from snapshot_manager import get_latest_two_snapshot_paths
 
 
 def main() -> None:
-    prev_path = SNAPSHOTS_DIR / "2026-03-26.csv"
-    today_path = SNAPSHOTS_DIR / "2026-03-27.csv"
+    parser = argparse.ArgumentParser(description="두 snapshot으로 HTML 리포트를 생성합니다")
+    parser.add_argument("--previous", type=Path)
+    parser.add_argument("--current", type=Path)
+    args = parser.parse_args()
+
+    default_prev, default_today = (
+        get_latest_two_snapshot_paths()
+        if args.previous is None or args.current is None
+        else (args.previous, args.current)
+    )
+    prev_path = args.previous or default_prev
+    today_path = args.current or default_today
     ai_analysis_path = ROOT_DIR / "temp" / "gemini_analysis_preview.json"
 
     prev_df = pd.read_csv(prev_path, encoding="utf-8-sig")
@@ -30,6 +43,7 @@ def main() -> None:
     )
 
     output_path = ROOT_DIR / "temp" / "compare_report_preview.html"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html_report, encoding="utf-8")
 
     print(f"HTML 리포트 저장 완료: {output_path}")

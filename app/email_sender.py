@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import smtplib
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formatdate, make_msgid
 
 from config import SMTP_PASS, SMTP_USER, TO_EMAIL
 from logging_utils import setup_logger
@@ -22,6 +24,8 @@ def send_html_email(subject: str, html_body: str, text_body: str | None = None) 
     msg["Subject"] = subject
     msg["From"] = SMTP_USER
     msg["To"] = TO_EMAIL
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=SMTP_USER.split("@")[-1])
 
     if text_body:
         msg.attach(MIMEText(text_body, "plain", "utf-8"))
@@ -31,7 +35,7 @@ def send_html_email(subject: str, html_body: str, text_body: str | None = None) 
     logger.info(f"[EMAIL] sending email to {TO_EMAIL}")
 
     with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
-        server.starttls()
+        server.starttls(context=ssl.create_default_context())
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(SMTP_USER, [TO_EMAIL], msg.as_string())
 

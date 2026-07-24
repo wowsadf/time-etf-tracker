@@ -5,3 +5,7 @@ __pycache__/
 temp/
 .vscode/
 manual_inputs/
+.pytest_cache/
+.coverage
+htmlcov/
+*.tmp

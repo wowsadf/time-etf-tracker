@@ -8,7 +8,7 @@ from fetcher import download_excel_with_retry
 from holdings_parser import load_holdings_excel
 from logging_utils import setup_logger
 from snapshot_manager import compute_snapshot_hash, save_snapshot
-from state_manager import load_state, save_state
+from state_manager import load_state, path_to_state_value, save_state
 from validator import validate_holdings
 
 logger = setup_logger()
@@ -35,7 +35,7 @@ def main() -> None:
 
     snapshot_hash = compute_snapshot_hash(df)
 
-    if state.get("last_success_hash") == snapshot_hash:
+    if state.get("last_snapshot_hash") == snapshot_hash:
         logger.info("[COLLECT] duplicate valid snapshot detected. save skipped.")
         state["last_attempt_status"] = "duplicate_valid_snapshot"
         state["last_attempt_message"] = "직전 유효 스냅샷과 내용이 동일합니다"
@@ -46,9 +46,9 @@ def main() -> None:
 
     state["last_attempt_status"] = "saved"
     state["last_attempt_message"] = "새 유효 스냅샷 저장 완료"
-    state["last_success_hash"] = snapshot_hash
-    state["last_success_snapshot"] = str(saved_path)
-    state["last_success_saved_at"] = now_kst_iso()
+    state["last_snapshot_hash"] = snapshot_hash
+    state["last_snapshot_path"] = path_to_state_value(saved_path)
+    state["last_snapshot_saved_at"] = now_kst_iso()
     save_state(state)
 
     logger.info(f"[COLLECT] snapshot saved: {saved_path}")

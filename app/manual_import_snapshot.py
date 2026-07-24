@@ -14,8 +14,8 @@ logger = setup_logger()
 def main() -> None:
     input_files = sorted(MANUAL_INPUTS_DIR.glob("*.xlsx"))
 
-    if len(input_files) < 2:
-        raise RuntimeError("manual_inputs 폴더에 xlsx 파일이 최소 2개 있어야 합니다")
+    if not input_files:
+        raise RuntimeError("manual_inputs 폴더에 xlsx 파일이 최소 1개 있어야 합니다")
 
     logger.info(f"[IMPORT] found {len(input_files)} xlsx files")
 

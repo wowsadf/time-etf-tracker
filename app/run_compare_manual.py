@@ -1,18 +1,31 @@
 from __future__ import annotations
 
+import argparse
+from pathlib import Path
+
 import pandas as pd
 
 from compare import compare_holdings
 from logging_utils import setup_logger
-from paths import SNAPSHOTS_DIR
 from reporter import build_compare_report_text
+from snapshot_manager import get_latest_two_snapshot_paths
 
 logger = setup_logger()
 
 
 def main() -> None:
-    prev_path = SNAPSHOTS_DIR / "2026-03-26.csv"
-    today_path = SNAPSHOTS_DIR / "2026-03-27.csv"
+    parser = argparse.ArgumentParser(description="두 ETF snapshot CSV를 비교합니다")
+    parser.add_argument("--previous", type=Path)
+    parser.add_argument("--current", type=Path)
+    args = parser.parse_args()
+
+    default_prev, default_today = (
+        get_latest_two_snapshot_paths()
+        if args.previous is None or args.current is None
+        else (args.previous, args.current)
+    )
+    prev_path = args.previous or default_prev
+    today_path = args.current or default_today
 
     if not prev_path.exists():
         raise FileNotFoundError(f"이전 snapshot 파일이 없습니다: {prev_path}")

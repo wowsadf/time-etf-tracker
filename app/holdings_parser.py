@@ -100,7 +100,5 @@ def load_holdings_excel(file_path: Path) -> pd.DataFrame:
     df["asset_type"] = df.apply(classify_asset, axis=1)
 
     df = df[df["asset_key"] != ""].copy()
-    df = df.drop_duplicates(subset=["asset_key"], keep="first").copy()
-
     logger.info(f"[PARSE] parsed rows={len(df)}")
     return df

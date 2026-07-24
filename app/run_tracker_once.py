@@ -18,7 +18,12 @@ from reporter import (
     build_compare_report_text,
 )
 from snapshot_manager import compute_snapshot_hash, load_snapshot_df, save_snapshot
-from state_manager import load_state, save_state
+from state_manager import (
+    load_state,
+    path_to_state_value,
+    resolve_state_path,
+    save_state,
+)
 from validator import validate_holdings
 
 logger = setup_logger()
@@ -69,18 +74,21 @@ def send_report(prev_snapshot_path: Path, current_snapshot_path: Path) -> None:
     )
 
 
-def retry_pending_report_if_needed(state: dict, current_hash: str) -> bool:
+def retry_pending_report_if_needed(state: dict) -> bool:
     pending_hash = state.get("pending_report_hash")
     pending_snapshot_path = state.get("pending_snapshot_path")
     pending_previous_snapshot_path = state.get("pending_previous_snapshot_path")
 
-    if pending_hash != current_hash:
+    if not pending_hash:
         return False
     if not pending_snapshot_path or not pending_previous_snapshot_path:
-        return False
+        raise RuntimeError("pending report 상태에 snapshot 경로가 없습니다")
 
-    current_path = Path(pending_snapshot_path)
-    prev_path = Path(pending_previous_snapshot_path)
+    current_path = resolve_state_path(pending_snapshot_path)
+    prev_path = resolve_state_path(pending_previous_snapshot_path)
+
+    if current_path is None or prev_path is None:
+        raise RuntimeError("pending report snapshot 경로를 해석할 수 없습니다")
 
     if not current_path.exists() or not prev_path.exists():
         raise FileNotFoundError("pending report용 snapshot 파일이 존재하지 않습니다")
@@ -89,7 +97,7 @@ def retry_pending_report_if_needed(state: dict, current_hash: str) -> bool:
     send_report(prev_path, current_path)
 
     state["last_reported_hash"] = pending_hash
-    state["last_reported_snapshot_path"] = str(current_path)
+    state["last_reported_snapshot_path"] = path_to_state_value(current_path)
     state["last_reported_at"] = now_kst_iso()
     state["last_attempt_status"] = "reported_after_retry"
     state["last_attempt_message"] = "이전 실패 건 보고 재시도 성공"
@@ -102,6 +110,8 @@ def main() -> None:
     state = load_state()
 
     try:
+        pending_retried = retry_pending_report_if_needed(state)
+
         download_path = download_excel_with_retry()
         df = load_holdings_excel(download_path)
         validate_holdings(df)
@@ -113,7 +123,7 @@ def main() -> None:
 
         # 이미 본 유효 스냅샷과 동일
         if snapshot_hash == last_snapshot_hash:
-            if retry_pending_report_if_needed(state, snapshot_hash):
+            if pending_retried:
                 return
 
             logger.info("[TRACKER] duplicate valid snapshot detected. skipped.")
@@ -122,12 +132,15 @@ def main() -> None:
             save_state(state)
             return
 
-        previous_snapshot_path = Path(last_snapshot_path_str) if last_snapshot_path_str else None
+        previous_snapshot_path = resolve_state_path(last_snapshot_path_str)
+
+        if previous_snapshot_path is not None and not previous_snapshot_path.exists():
+            raise FileNotFoundError(f"직전 유효 스냅샷 파일이 없습니다: {previous_snapshot_path}")
 
         saved_path = save_snapshot(df, snapshot_date=now_kst_iso()[:10])
 
         state["last_snapshot_hash"] = snapshot_hash
-        state["last_snapshot_path"] = str(saved_path)
+        state["last_snapshot_path"] = path_to_state_value(saved_path)
         state["last_snapshot_saved_at"] = now_kst_iso()
 
         # 첫 유효 스냅샷이면 저장만 하고 비교/보고는 하지 않음
@@ -140,13 +153,10 @@ def main() -> None:
             logger.info(f"[TRACKER] initial snapshot saved: {saved_path}")
             return
 
-        if not previous_snapshot_path.exists():
-            raise FileNotFoundError(f"직전 유효 스냅샷 파일이 없습니다: {previous_snapshot_path}")
-
         # 새 유효 스냅샷 저장 후 보고 전 상태 기록
         state["pending_report_hash"] = snapshot_hash
-        state["pending_snapshot_path"] = str(saved_path)
-        state["pending_previous_snapshot_path"] = str(previous_snapshot_path)
+        state["pending_snapshot_path"] = path_to_state_value(saved_path)
+        state["pending_previous_snapshot_path"] = path_to_state_value(previous_snapshot_path)
         state["last_attempt_status"] = "saved_pending_report"
         state["last_attempt_message"] = "새 유효 스냅샷 저장 완료. 이제 비교/보고를 진행합니다"
         save_state(state)
@@ -154,7 +164,7 @@ def main() -> None:
         send_report(previous_snapshot_path, saved_path)
 
         state["last_reported_hash"] = snapshot_hash
-        state["last_reported_snapshot_path"] = str(saved_path)
+        state["last_reported_snapshot_path"] = path_to_state_value(saved_path)
         state["last_reported_at"] = now_kst_iso()
         state["last_attempt_status"] = "reported"
         state["last_attempt_message"] = "새 유효 스냅샷 비교 및 이메일 발송 완료"
