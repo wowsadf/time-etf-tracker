@@ -1,4 +1,5 @@
 {
+  "schema_version": 2,
   "last_attempt_status": "duplicate_valid_snapshot",
   "last_attempt_message": "직전 유효 스냅샷과 내용이 동일합니다",
   "last_snapshot_hash": "fe3790763983ffa3b009ab7d6da5690f9bca4f0ac62d859f2e36d2f4b340f8ab",
