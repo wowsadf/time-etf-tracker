@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
-  "last_attempt_status": "duplicate_valid_snapshot",
-  "last_attempt_message": "직전 유효 스냅샷과 내용이 동일합니다",
+  "last_attempt_status": "empty_template",
+  "last_attempt_message": "헤더만 있고 실제 구성종목 데이터가 없습니다",
   "last_snapshot_hash": "86e2d60b73c8154665e218dd3779cac3d6eeff617646a944dad5ddb353eebd2e",
   "last_snapshot_path": "snapshots/2026-07-28.csv",
   "last_snapshot_saved_at": "2026-07-28T09:10:01+09:00",
