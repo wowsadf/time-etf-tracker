@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 def get_env(name: str, required: bool = True, default: str | None = None) -> str | None:
-    value = os.environ.get(name, default)
+    value = os.environ.get(name) or default
     if required and not value:
         raise RuntimeError(f"필수 환경변수가 없습니다: {name}")
     return value
@@ -72,5 +73,10 @@ DOWNLOAD_MAX_RETRIES = get_int_env(
 )
 
 GEMINI_API_KEY = get_env("GEMINI_API_KEY", required=False)
-GEMINI_MODEL = get_env("GEMINI_MODEL", required=False, default="gemini-3.6-flash")
-GEMINI_FALLBACK_MODEL = get_env("GEMINI_FALLBACK_MODEL", required=False, default="gemini-3.5-flash-lite")
+GEMINI_MODEL = get_env("GEMINI_MODEL", required=False, default="gemini-3.8-flash")
+GLM_API_KEY = get_env("GLM_API_KEY", required=False)
+GLM_MODEL = get_env("GLM_MODEL", required=False, default="glm-4.7-flash")
+GLM_BASE_URL = get_env(
+    "GLM_BASE_URL", required=False, default="https://open.bigmodel.cn/api/paas/v4"
+)
+AI_TIMEOUT_SEC = get_int_env("AI_TIMEOUT_SEC", default=90, minimum=1)

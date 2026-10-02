@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
+from decimal import Decimal
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -11,22 +14,40 @@ import pandas as pd
 from paths import SNAPSHOTS_DIR
 
 
-def compute_snapshot_hash(df: pd.DataFrame) -> str:
+def compute_snapshot_hash(df: pd.DataFrame, *, legacy: bool = False) -> str:
     cols = ["asset_key", "종목명", "수량", "평가금액(원)", "비중(%)", "asset_type"]
 
     normalized = df[cols].copy()
     normalized = normalized.sort_values("asset_key").reset_index(drop=True)
 
-    normalized["수량"] = normalized["수량"].fillna(0)
-    normalized["평가금액(원)"] = normalized["평가금액(원)"].fillna(0)
-    normalized["비중(%)"] = normalized["비중(%)"].fillna(0).round(6)
-
-    payload = normalized.to_csv(index=False)
+    if legacy:
+        # 배포 전에 저장된 미발송 보고서의 무결성 확인에만 사용한다.
+        normalized["수량"] = normalized["수량"].fillna(0)
+        normalized["평가금액(원)"] = normalized["평가금액(원)"].fillna(0)
+        normalized["비중(%)"] = normalized["비중(%)"].fillna(0).round(6)
+        payload = normalized.to_csv(index=False)
+    else:
+        for col in ["수량", "평가금액(원)", "비중(%)"]:
+            numeric = pd.to_numeric(normalized[col], errors="raise")
+            if col == "비중(%)":
+                numeric = numeric.round(6)
+            def canonical(value):
+                number = Decimal(str(value))
+                if not number.is_finite():
+                    raise ValueError(f"스냅샷 {col}에 유효하지 않은 숫자가 있습니다")
+                return "0" if number == 0 else format(number.normalize(), "f")
+            normalized[col] = numeric.map(canonical)
+        if normalized.isna().any().any():
+            raise ValueError("스냅샷에 누락된 값이 있습니다")
+        payload = json.dumps(normalized.values.tolist(), ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def make_snapshot_filename(snapshot_date: str | None = None) -> str:
     if snapshot_date:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", snapshot_date):
+            raise ValueError("스냅샷 날짜는 YYYY-MM-DD 형식이어야 합니다")
+        datetime.strptime(snapshot_date, "%Y-%m-%d")
         return f"{snapshot_date}.csv"
 
     now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
@@ -65,17 +86,10 @@ def save_snapshot(df: pd.DataFrame, snapshot_date: str | None = None) -> Path:
     unique_path = SNAPSHOTS_DIR / f"{dated_stem}_{timestamp}_{snapshot_hash[:8]}.csv"
 
     if unique_path.exists():
-        return unique_path
+        raise FileExistsError(f"스냅샷 저장 경로 충돌: {unique_path.name}")
 
     _write_snapshot_atomic(df, unique_path)
     return unique_path
-
-
-def save_snapshot_as(df: pd.DataFrame, file_name: str) -> Path:
-    SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-    path = SNAPSHOTS_DIR / file_name
-    _write_snapshot_atomic(df, path)
-    return path
 
 
 def _write_snapshot_atomic(df: pd.DataFrame, path: Path) -> None:

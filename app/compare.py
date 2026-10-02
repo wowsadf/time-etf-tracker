@@ -4,12 +4,12 @@ import pandas as pd
 
 
 def add_rank(df: pd.DataFrame) -> pd.DataFrame:
-    ranked = df.copy()
+    ranked = df.reset_index(drop=True).copy()
     ranked["rank"] = pd.NA
 
     stock_indices = ranked[ranked["asset_type"] == "stock"].sort_values(
-        "비중(%)",
-        ascending=False,
+        ["비중(%)", "asset_key"],
+        ascending=[False, True],
     ).index
     ranked.loc[stock_indices, "rank"] = range(1, len(stock_indices) + 1)
     ranked["rank"] = pd.to_numeric(ranked["rank"], errors="coerce")
@@ -26,6 +26,7 @@ def compare_holdings(today_df: pd.DataFrame, prev_df: pd.DataFrame) -> pd.DataFr
         how="outer",
         suffixes=("_today", "_prev"),
         indicator=True,
+        validate="one_to_one",
     )
 
     merged["종목명"] = merged["종목명_today"].fillna(merged["종목명_prev"])
@@ -40,6 +41,9 @@ def compare_holdings(today_df: pd.DataFrame, prev_df: pd.DataFrame) -> pd.DataFr
     merged["수량_today"] = pd.to_numeric(merged["수량_today"], errors="coerce").fillna(0)
     merged["수량_prev"] = pd.to_numeric(merged["수량_prev"], errors="coerce").fillna(0)
     merged["quantity_diff"] = (merged["수량_today"] - merged["수량_prev"]).round(6)
+    merged["quantity_change_pct"] = (
+        merged["quantity_diff"] / merged["수량_prev"].where(merged["수량_prev"] > 0) * 100
+    ).round(4)
 
     merged["평가금액(원)_today"] = pd.to_numeric(
         merged["평가금액(원)_today"], errors="coerce"

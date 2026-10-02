@@ -44,27 +44,28 @@ def download_excel_with_retry(
         try:
             logger.info(f"[FETCH] download attempt {attempt}/{max_retries}")
 
-            response = requests.get(
+            with requests.get(
                 ETF_DOWNLOAD_URL,
                 headers=headers,
                 timeout=timeout,
-            )
-            response.raise_for_status()
-
-            content_type = response.headers.get("Content-Type", "").lower()
-            if "text/html" in content_type:
-                raise ValueError(f"엑셀 대신 HTML 응답을 받았습니다: {content_type}")
-
-            content_length = response.headers.get("Content-Length")
-            if content_length and int(content_length) > MAX_DOWNLOAD_SIZE_BYTES:
-                raise ValueError(f"다운로드 파일이 너무 큽니다: {content_length} bytes")
-
-            if len(response.content) > MAX_DOWNLOAD_SIZE_BYTES:
-                raise ValueError(f"다운로드 파일이 너무 큽니다: {len(response.content)} bytes")
-
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            temp_path = save_path.with_name(f".{save_path.name}.{uuid4().hex}.tmp")
-            temp_path.write_bytes(response.content)
+                stream=True,
+            ) as response:
+                response.raise_for_status()
+                content_type = response.headers.get("Content-Type", "").lower()
+                if "text/html" in content_type:
+                    raise ValueError("엑셀 대신 HTML 응답을 받았습니다")
+                content_length = response.headers.get("Content-Length")
+                if content_length and int(content_length) > MAX_DOWNLOAD_SIZE_BYTES:
+                    raise ValueError("다운로드 파일이 20MB 제한을 초과합니다")
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path = save_path.with_name(f".{save_path.name}.{uuid4().hex}.tmp")
+                received = 0
+                with temp_path.open("wb") as target:
+                    for chunk in response.iter_content(chunk_size=64 * 1024):
+                        received += len(chunk)
+                        if received > MAX_DOWNLOAD_SIZE_BYTES:
+                            raise ValueError("다운로드 파일이 20MB 제한을 초과합니다")
+                        target.write(chunk)
 
             file_size = temp_path.stat().st_size
             logger.info(f"[FETCH] downloaded file size={file_size} bytes")

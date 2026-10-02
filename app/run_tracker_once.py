@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from ai_analyzer_gemini import analyze_compare_payload_with_gemini
+from ai_analyzer import analyze_compare_payload
 from compare import compare_holdings
 from config import EMAIL_SUBJECT_PREFIX, REPORT_TITLE
 from email_sender import send_html_email
@@ -43,29 +43,37 @@ def clear_pending_report_fields(state: dict) -> None:
     state["pending_previous_snapshot_path"] = None
 
 
-def try_build_ai_analysis(compared_df):
+def try_build_ai_analysis(compared_df, previous_label=None, current_label=None):
     try:
-        ai_payload = build_compare_ai_payload(compared_df)
-        ai_result = analyze_compare_payload_with_gemini(ai_payload)
-        return ai_result.model_dump()
+        ai_payload = build_compare_ai_payload(
+            compared_df, previous_label=previous_label, current_label=current_label,
+        )
+        return analyze_compare_payload(ai_payload)
     except Exception as exc:
-        logger.warning(f"[AI] analysis skipped due to error: {exc}")
+        logger.warning("[AI] analysis unavailable (%s)", type(exc).__name__)
         return None
 
 
 def send_report(prev_snapshot_path: Path, current_snapshot_path: Path) -> None:
     prev_df = load_snapshot_df(prev_snapshot_path)
     current_df = load_snapshot_df(current_snapshot_path)
+    validate_holdings(prev_df)
+    validate_holdings(current_df)
 
     compared = compare_holdings(current_df, prev_df)
-    ai_analysis = try_build_ai_analysis(compared)
+    ai_analysis = try_build_ai_analysis(compared, prev_snapshot_path.stem, current_snapshot_path.stem)
 
     html_body = build_compare_report_html(
         compared,
         title=REPORT_TITLE,
         ai_analysis=ai_analysis,
+        previous_label=prev_snapshot_path.stem,
+        current_label=current_snapshot_path.stem,
     )
-    text_body = build_compare_report_text(compared)
+    text_body = build_compare_report_text(
+        compared, ai_analysis=ai_analysis,
+        previous_label=prev_snapshot_path.stem, current_label=current_snapshot_path.stem,
+    )
 
     send_html_email(
         subject=make_email_subject(current_snapshot_path),
@@ -92,11 +100,17 @@ def retry_pending_report_if_needed(state: dict) -> bool:
 
     if not current_path.exists() or not prev_path.exists():
         raise FileNotFoundError("pending report용 snapshot 파일이 존재하지 않습니다")
+    current_df = load_snapshot_df(current_path)
+    canonical_hash = compute_snapshot_hash(current_df)
+    if pending_hash not in {canonical_hash, compute_snapshot_hash(current_df, legacy=True)}:
+        raise ValueError("미발송 스냅샷의 내용이 저장 당시와 다릅니다. 발송을 중단합니다")
 
     logger.info("[TRACKER] pending report detected. retrying report send.")
     send_report(prev_path, current_path)
 
-    state["last_reported_hash"] = pending_hash
+    state["last_reported_hash"] = canonical_hash
+    if state.get("last_snapshot_path") == pending_snapshot_path:
+        state["last_snapshot_hash"] = canonical_hash
     state["last_reported_snapshot_path"] = path_to_state_value(current_path)
     state["last_reported_at"] = now_kst_iso()
     state["last_attempt_status"] = "reported_after_retry"
@@ -118,12 +132,24 @@ def main() -> None:
 
         snapshot_hash = compute_snapshot_hash(df)
 
-        last_snapshot_hash = state.get("last_snapshot_hash")
         last_snapshot_path_str = state.get("last_snapshot_path")
+        previous_snapshot_path = resolve_state_path(last_snapshot_path_str)
+        if previous_snapshot_path is not None and not previous_snapshot_path.exists():
+            raise FileNotFoundError(f"직전 유효 스냅샷 파일이 없습니다: {previous_snapshot_path}")
+        # 해시 표현이 바뀌어도 동일한 데이터에 중복 메일을 보내지 않는다.
+        last_snapshot_hash = None
+        if previous_snapshot_path is not None:
+            previous_df = load_snapshot_df(previous_snapshot_path)
+            validate_holdings(previous_df)
+            last_snapshot_hash = compute_snapshot_hash(previous_df)
 
         # 이미 본 유효 스냅샷과 동일
         if snapshot_hash == last_snapshot_hash:
+            if state.get("last_reported_hash") == state.get("last_snapshot_hash"):
+                state["last_reported_hash"] = snapshot_hash
+            state["last_snapshot_hash"] = snapshot_hash
             if pending_retried:
+                save_state(state)
                 return
 
             logger.info("[TRACKER] duplicate valid snapshot detected. skipped.")
@@ -131,11 +157,6 @@ def main() -> None:
             state["last_attempt_message"] = "직전 유효 스냅샷과 내용이 동일합니다"
             save_state(state)
             return
-
-        previous_snapshot_path = resolve_state_path(last_snapshot_path_str)
-
-        if previous_snapshot_path is not None and not previous_snapshot_path.exists():
-            raise FileNotFoundError(f"직전 유효 스냅샷 파일이 없습니다: {previous_snapshot_path}")
 
         saved_path = save_snapshot(df, snapshot_date=now_kst_iso()[:10])
 

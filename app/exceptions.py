@@ -7,3 +7,7 @@ class StateCorruptionError(RuntimeError):
     """상태 파일이 손상되었거나 예상한 JSON 구조가 아닌 상태"""
 
     pass
+
+
+class AIDataMismatchError(ValueError):
+    """AI 수량 사실 확인표가 Python 계산 결과와 일치하지 않음"""

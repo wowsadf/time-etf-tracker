@@ -60,11 +60,13 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           TO_EMAIL: ${{ secrets.TO_EMAIL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
           ETF_DOWNLOAD_URL: "https://timeetf.co.kr/pdf_excel.php?idx=2&"
           REPORT_TITLE: "TIME 미국나스닥100 액티브 구성종목 변화"
           EMAIL_SUBJECT_PREFIX: "[ETF]"
-          GEMINI_MODEL: "gemini-3.6-flash"
-          GEMINI_FALLBACK_MODEL: "gemini-3.5-flash-lite"
+          GEMINI_MODEL: "gemini-3.8-flash"
+          GLM_MODEL: "glm-4.7-flash"
+          GLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4"
           DOWNLOAD_TIMEOUT_SEC: "30"
           DOWNLOAD_MAX_RETRIES: "3"
         run: |

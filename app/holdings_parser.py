@@ -72,6 +72,8 @@ def load_holdings_excel(file_path: Path) -> pd.DataFrame:
 
     df.columns = [normalize_text(c) for c in df.columns]
     validate_required_columns(df)
+    # 정규화 전에 완전히 빈 행만 제거한다. 일부 값만 없는 행을 숨기면 안 된다.
+    df = df.dropna(subset=REQUIRED_COLUMNS, how="all").copy()
 
     df["종목코드"] = df["종목코드"].apply(normalize_text)
     df["종목명"] = df["종목명"].apply(normalize_text)
@@ -94,11 +96,8 @@ def load_holdings_excel(file_path: Path) -> pd.DataFrame:
 
     df["비중(%)"] = pd.to_numeric(df["비중(%)"], errors="coerce")
 
-    df = df.dropna(how="all").copy()
-
     df["asset_key"] = df.apply(make_asset_key, axis=1)
     df["asset_type"] = df.apply(classify_asset, axis=1)
 
-    df = df[df["asset_key"] != ""].copy()
     logger.info(f"[PARSE] parsed rows={len(df)}")
     return df

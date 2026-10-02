@@ -45,7 +45,7 @@ def load_state() -> dict[str, Any]:
         raise StateCorruptionError("상태 파일의 최상위 JSON은 객체여야 합니다")
 
     raw_schema_version = data.get("schema_version", 1)
-    if not isinstance(raw_schema_version, int) or raw_schema_version < 1:
+    if type(raw_schema_version) is not int or raw_schema_version < 1:
         raise StateCorruptionError(f"상태 스키마 버전이 잘못되었습니다: {raw_schema_version}")
     if raw_schema_version > STATE_SCHEMA_VERSION:
         raise StateCorruptionError(
@@ -55,6 +55,16 @@ def load_state() -> dict[str, Any]:
     merged = default_state()
     merged.update(data)
     merged["schema_version"] = STATE_SCHEMA_VERSION
+    for name in default_state():
+        if name != "schema_version" and merged[name] is not None and not isinstance(merged[name], str):
+            raise StateCorruptionError(f"상태 필드는 문자열 또는 null이어야 합니다: {name}")
+    for group in [
+        ["last_snapshot_hash", "last_snapshot_path"],
+        ["pending_report_hash", "pending_snapshot_path", "pending_previous_snapshot_path"],
+    ]:
+        values = [bool(merged[name]) for name in group]
+        if any(values) and not all(values):
+            raise StateCorruptionError(f"서로 연결된 상태 필드가 일부 누락되었습니다: {group}")
     return merged
 
 
