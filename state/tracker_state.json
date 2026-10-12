@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
-  "last_attempt_status": "reported",
-  "last_attempt_message": "새 유효 스냅샷 비교 및 이메일 발송 완료",
+  "last_attempt_status": "duplicate_valid_snapshot",
+  "last_attempt_message": "직전 유효 스냅샷과 내용이 동일합니다",
   "last_snapshot_hash": "9d1693ef563a3047722db3eb0e7f9b8b06dcddc8bd0ebf245972c56836ff005e",
   "last_snapshot_path": "snapshots/2026-10-12.csv",
   "last_snapshot_saved_at": "2026-10-12T07:52:40+09:00",
