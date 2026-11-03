@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
-  "last_attempt_status": "reported",
-  "last_attempt_message": "새 유효 스냅샷 비교 및 이메일 발송 완료",
+  "last_attempt_status": "empty_template",
+  "last_attempt_message": "헤더만 있고 실제 구성종목 데이터가 없습니다",
   "last_snapshot_hash": "5e3cc63406dd8d7b6d4aa6f6e93cf676c8112f11ced39066f04249b744282f73",
   "last_snapshot_path": "snapshots/2026-11-03.csv",
   "last_snapshot_saved_at": "2026-11-03T12:55:26+09:00",
