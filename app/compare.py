@@ -89,3 +89,11 @@ def compare_holdings(today_df: pd.DataFrame, prev_df: pd.DataFrame) -> pd.DataFr
     ] = "sold"
 
     return merged.drop(columns=["_merge"])
+
+
+def has_stock_quantity_changes(compared: pd.DataFrame) -> bool:
+    """편입·편출 또는 기존 주식 수량 증감만 자동 메일의 발송 사유로 본다."""
+    return bool((
+        compared["asset_type"].eq("stock")
+        & compared["quantity_status"].isin(["new", "removed", "bought", "sold"])
+    ).any())

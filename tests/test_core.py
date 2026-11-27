@@ -4,6 +4,7 @@ import sys
 import shutil
 import json
 import unittest
+from copy import deepcopy
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -25,7 +26,7 @@ import ai_analyzer  # noqa: E402
 import fetcher  # noqa: E402
 import manual  # noqa: E402
 import email_sender  # noqa: E402
-from compare import compare_holdings, add_rank  # noqa: E402
+from compare import compare_holdings, add_rank, has_stock_quantity_changes  # noqa: E402
 from exceptions import StateCorruptionError, DataNotReadyError  # noqa: E402
 from holdings_parser import load_holdings_excel  # noqa: E402
 from reporter import build_compare_report_html, build_compare_report_text, build_compare_ai_payload  # noqa: E402
@@ -308,6 +309,7 @@ class TrackerRetryTests(unittest.TestCase):
             data = valid_df()
             previous, current = temp_dir / "previous.csv", temp_dir / "current.csv"
             data.to_csv(previous, index=False, encoding="utf-8-sig")
+            data.loc[0, "수량"] += 1
             data.to_csv(current, index=False, encoding="utf-8-sig")
             with (
                 patch.object(run_tracker_once, "analyze_compare_payload", side_effect=ValueError("invalid AI")),
@@ -323,6 +325,7 @@ class TrackerRetryTests(unittest.TestCase):
             current_path = temp_dir / "current.csv"
             data = valid_df()
             data.to_csv(previous_path, index=False, encoding="utf-8-sig")
+            data.loc[0, "수량"] += 1
             data.to_csv(current_path, index=False, encoding="utf-8-sig")
             pending_hash = snapshot_manager.compute_snapshot_hash(data)
 
@@ -334,7 +337,7 @@ class TrackerRetryTests(unittest.TestCase):
             })
 
             with (
-                patch.object(run_tracker_once, "send_report") as mocked_send,
+                patch.object(run_tracker_once, "send_report", return_value=True) as mocked_send,
                 patch.object(run_tracker_once, "save_state") as mocked_save,
             ):
                 retried = run_tracker_once.retry_pending_report_if_needed(state)
@@ -392,6 +395,131 @@ class TrackerRetryTests(unittest.TestCase):
                 send.assert_not_called()
                 save.assert_not_called()
             self.assertEqual(state["last_attempt_status"], "duplicate_valid_snapshot")
+
+
+class TrackerNotificationPolicyTests(unittest.TestCase):
+    def run_tracker(self, previous, currents):
+        """Real snapshot/report flow, with download, AI, SMTP and operating state isolated."""
+        with workspace_temp_dir() as temp_dir:
+            previous_path = temp_dir / "previous.csv"
+            previous.to_csv(previous_path, index=False, encoding="utf-8-sig")
+            state = state_manager.default_state()
+            previous_hash = snapshot_manager.compute_snapshot_hash(previous)
+            state.update({
+                "last_snapshot_path": str(previous_path), "last_snapshot_hash": previous_hash,
+                "last_reported_snapshot_path": str(previous_path), "last_reported_hash": previous_hash,
+                "last_reported_at": "previous-report-time",
+            })
+            initial = deepcopy(state)
+            persisted, after_runs = [], []
+            with (
+                patch.object(snapshot_manager, "SNAPSHOTS_DIR", temp_dir),
+                patch.object(run_tracker_once, "load_state", return_value=state),
+                patch.object(run_tracker_once, "save_state", side_effect=lambda value: persisted.append(deepcopy(value))),
+                patch.object(run_tracker_once, "download_excel_with_retry"),
+                patch.object(run_tracker_once, "load_holdings_excel", side_effect=[df.copy() for df in currents]),
+                patch.object(run_tracker_once, "try_build_ai_analysis", return_value=None) as ai,
+                patch.object(run_tracker_once, "send_html_email") as email,
+                patch.object(run_tracker_once, "send_report", wraps=run_tracker_once.send_report) as report,
+                patch.object(run_tracker_once, "now_kst_iso", return_value="2026-11-27T12:00:00+09:00"),
+            ):
+                for _ in currents:
+                    run_tracker_once.main()
+                    after_runs.append(deepcopy(state))
+                stored = snapshot_manager.load_snapshot_df(state_manager.resolve_state_path(state["last_snapshot_path"]))
+                pairs = [tuple(state_manager.path_to_state_value(path) for path in call.args) for call in report.call_args_list]
+            return {"state": state, "initial": initial, "persisted": persisted, "after_runs": after_runs,
+                    "ai_calls": ai.call_count, "email_calls": email.call_count, "stored": stored, "report_pairs": pairs}
+
+    def assert_quiet_day(self, result):
+        self.assertEqual(result["ai_calls"], 0)
+        self.assertEqual(result["email_calls"], 0)
+        self.assertEqual(result["state"]["last_attempt_status"], "saved_without_stock_quantity_change")
+        for key in ["last_reported_hash", "last_reported_snapshot_path", "last_reported_at"]:
+            self.assertEqual(result["state"][key], result["initial"][key])
+        self.assertNotEqual(result["state"]["last_snapshot_hash"], result["initial"]["last_snapshot_hash"])
+        self.assertTrue(all(state["pending_report_hash"] is None for state in result["persisted"]))
+
+    def test_weight_valuation_and_rank_changes_only_save_snapshot(self):
+        previous, current = valid_df(), valid_df()
+        current.loc[0, "비중(%)"] += 0.5
+        current.loc[1, "비중(%)"] -= 0.5
+        current.loc[0, "평가금액(원)"] += 5
+        result = self.run_tracker(previous, [current])
+        self.assert_quiet_day(result)
+        self.assertEqual(result["state"]["last_snapshot_hash"], snapshot_manager.compute_snapshot_hash(current))
+        self.assertEqual(result["stored"].loc[0, "비중(%)"], 10.5)
+
+    def test_cash_or_futures_quantity_only_does_not_notify(self):
+        for asset_type in ["cash", "futures"]:
+            with self.subTest(asset_type=asset_type):
+                previous = valid_df()
+                previous["비중(%)"] = 9.5
+                previous.loc[10] = ["OTHER", "현금" if asset_type == "cash" else "선물", 100, 100, 5.0, "OTHER", asset_type]
+                current = previous.copy()
+                current.loc[10, "수량"] -= 1
+                self.assert_quiet_day(self.run_tracker(previous, [current]))
+
+    def test_stock_quantity_increase_or_decrease_notifies(self):
+        for delta in [-1, 1]:
+            with self.subTest(delta=delta):
+                previous, current = valid_df(), valid_df()
+                current.loc[0, "수량"] += delta
+                result = self.run_tracker(previous, [current])
+                self.assertEqual(result["email_calls"], 1)
+                self.assertEqual(result["ai_calls"], 1)
+                self.assertEqual(result["state"]["last_attempt_status"], "reported")
+                self.assertEqual(result["state"]["last_reported_hash"], result["state"]["last_snapshot_hash"])
+                self.assertIsNone(result["state"]["pending_report_hash"])
+
+    def test_new_and_removed_stocks_notify_even_if_total_quantity_unchanged(self):
+        previous, current = valid_df(), valid_df()
+        current.loc[0, ["종목코드", "asset_key", "종목명"]] = ["NEW US EQUITY", "NEW US EQUITY", "New stock"]
+        self.assertTrue(has_stock_quantity_changes(compare_holdings(current, previous)))
+        result = self.run_tracker(previous, [current])
+        self.assertEqual(result["email_calls"], 1)
+        self.assertEqual(result["ai_calls"], 1)
+
+    def test_repeated_quiet_snapshot_stays_quiet(self):
+        previous, current = valid_df(), valid_df()
+        current.loc[0, "평가금액(원)"] += 1
+        result = self.run_tracker(previous, [current, current])
+        self.assertEqual(result["email_calls"], 0)
+        self.assertEqual(result["ai_calls"], 0)
+        self.assertEqual(result["state"]["last_attempt_status"], "duplicate_valid_snapshot")
+        self.assertEqual(result["state"]["last_reported_at"], "previous-report-time")
+
+    def test_quantity_change_after_quiet_day_compares_against_latest_snapshot(self):
+        previous, quiet = valid_df(), valid_df()
+        quiet.loc[0, "평가금액(원)"] += 1
+        changed = quiet.copy()
+        changed.loc[0, "수량"] += 1
+        result = self.run_tracker(previous, [quiet, changed])
+        self.assertEqual(result["email_calls"], 1)
+        self.assertEqual(result["report_pairs"][0][0], result["after_runs"][0]["last_snapshot_path"])
+
+    def test_legacy_pending_report_without_stock_quantity_change_is_dropped(self):
+        with workspace_temp_dir() as temp_dir:
+            previous, current = valid_df(), valid_df()
+            current.loc[0, "평가금액(원)"] += 1
+            prev_path, current_path = temp_dir / "previous.csv", temp_dir / "current.csv"
+            previous.to_csv(prev_path, index=False, encoding="utf-8-sig")
+            current.to_csv(current_path, index=False, encoding="utf-8-sig")
+            state = state_manager.default_state()
+            state.update({"last_snapshot_path": str(current_path),
+                          "last_snapshot_hash": snapshot_manager.compute_snapshot_hash(current),
+                          "last_reported_hash": "previous-report-hash", "last_reported_at": "previous-report-time",
+                          "pending_report_hash": snapshot_manager.compute_snapshot_hash(current),
+                          "pending_snapshot_path": str(current_path), "pending_previous_snapshot_path": str(prev_path)})
+            with (patch.object(run_tracker_once, "save_state"),
+                  patch.object(run_tracker_once, "try_build_ai_analysis") as ai,
+                  patch.object(run_tracker_once, "send_html_email") as email):
+                self.assertFalse(run_tracker_once.retry_pending_report_if_needed(state))
+            ai.assert_not_called()
+            email.assert_not_called()
+            self.assertIsNone(state["pending_report_hash"])
+            self.assertEqual(state["last_reported_at"], "previous-report-time")
+            self.assertEqual(state["last_reported_hash"], "previous-report-hash")
 
 
 class ReporterTests(unittest.TestCase):

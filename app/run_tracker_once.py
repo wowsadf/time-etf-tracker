@@ -5,7 +5,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from ai_analyzer import analyze_compare_payload
-from compare import compare_holdings
+from compare import compare_holdings, has_stock_quantity_changes
 from config import EMAIL_SUBJECT_PREFIX, REPORT_TITLE
 from email_sender import send_html_email
 from exceptions import DataNotReadyError
@@ -43,6 +43,14 @@ def clear_pending_report_fields(state: dict) -> None:
     state["pending_previous_snapshot_path"] = None
 
 
+def save_without_report(state: dict) -> None:
+    clear_pending_report_fields(state)
+    state["last_attempt_status"] = "saved_without_stock_quantity_change"
+    state["last_attempt_message"] = "주식 수량·편입·편출 변화가 없어 스냅샷만 보존하고 AI·메일을 생략했습니다"
+    save_state(state)
+    logger.info("[TRACKER] no stock quantity/composition changes. skipped AI and email.")
+
+
 def try_build_ai_analysis(compared_df, previous_label=None, current_label=None):
     try:
         ai_payload = build_compare_ai_payload(
@@ -54,13 +62,15 @@ def try_build_ai_analysis(compared_df, previous_label=None, current_label=None):
         return None
 
 
-def send_report(prev_snapshot_path: Path, current_snapshot_path: Path) -> None:
+def send_report(prev_snapshot_path: Path, current_snapshot_path: Path) -> bool:
     prev_df = load_snapshot_df(prev_snapshot_path)
     current_df = load_snapshot_df(current_snapshot_path)
     validate_holdings(prev_df)
     validate_holdings(current_df)
 
     compared = compare_holdings(current_df, prev_df)
+    if not has_stock_quantity_changes(compared):
+        return False
     ai_analysis = try_build_ai_analysis(compared, prev_snapshot_path.stem, current_snapshot_path.stem)
 
     html_body = build_compare_report_html(
@@ -80,6 +90,7 @@ def send_report(prev_snapshot_path: Path, current_snapshot_path: Path) -> None:
         html_body=html_body,
         text_body=text_body,
     )
+    return True
 
 
 def retry_pending_report_if_needed(state: dict) -> bool:
@@ -106,7 +117,11 @@ def retry_pending_report_if_needed(state: dict) -> bool:
         raise ValueError("미발송 스냅샷의 내용이 저장 당시와 다릅니다. 발송을 중단합니다")
 
     logger.info("[TRACKER] pending report detected. retrying report send.")
-    send_report(prev_path, current_path)
+    if not send_report(prev_path, current_path):
+        if state.get("last_snapshot_path") == pending_snapshot_path:
+            state["last_snapshot_hash"] = canonical_hash
+        save_without_report(state)
+        return False
 
     state["last_reported_hash"] = canonical_hash
     if state.get("last_snapshot_path") == pending_snapshot_path:
@@ -174,6 +189,11 @@ def main() -> None:
             logger.info(f"[TRACKER] initial snapshot saved: {saved_path}")
             return
 
+        # 가격·환율·현금만 변한 날도 비교 기준은 최신 정상 스냅샷으로 갱신한다.
+        if not has_stock_quantity_changes(compare_holdings(df, previous_df)):
+            save_without_report(state)
+            return
+
         # 새 유효 스냅샷 저장 후 보고 전 상태 기록
         state["pending_report_hash"] = snapshot_hash
         state["pending_snapshot_path"] = path_to_state_value(saved_path)
@@ -182,7 +202,9 @@ def main() -> None:
         state["last_attempt_message"] = "새 유효 스냅샷 저장 완료. 이제 비교/보고를 진행합니다"
         save_state(state)
 
-        send_report(previous_snapshot_path, saved_path)
+        if not send_report(previous_snapshot_path, saved_path):
+            save_without_report(state)
+            return
 
         state["last_reported_hash"] = snapshot_hash
         state["last_reported_snapshot_path"] = path_to_state_value(saved_path)
