@@ -122,4 +122,7 @@ def get_latest_two_snapshot_paths() -> tuple[Path, Path]:
 
 def load_snapshot_df(path: str | Path) -> pd.DataFrame:
     path = Path(path)
-    return pd.read_csv(path, encoding="utf-8-sig")
+    return pd.read_csv(
+        path, encoding="utf-8-sig", keep_default_na=False,
+        dtype={"asset_key": "str", "종목코드": "str", "종목명": "str", "asset_type": "str"},
+    )

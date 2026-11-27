@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import pandas as pd
+import numpy as np
 
 
 def add_rank(df: pd.DataFrame) -> pd.DataFrame:
     ranked = df.reset_index(drop=True).copy()
+    columns = ["수량", "평가금액(원)", "비중(%)"]
+    numeric = ranked[columns].apply(pd.to_numeric, errors="raise")
+    if not np.isfinite(numeric.to_numpy()).all():
+        raise ValueError("비교 데이터에 누락되거나 무한대인 숫자가 있습니다")
+    ranked[columns] = numeric
     ranked["rank"] = pd.NA
 
     stock_indices = ranked[ranked["asset_type"] == "stock"].sort_values(
@@ -30,6 +36,9 @@ def compare_holdings(today_df: pd.DataFrame, prev_df: pd.DataFrame) -> pd.DataFr
     )
 
     merged["종목명"] = merged["종목명_today"].fillna(merged["종목명_prev"])
+    both = merged["_merge"] == "both"
+    if (merged.loc[both, "asset_type_today"] != merged.loc[both, "asset_type_prev"]).any():
+        raise ValueError("같은 종목 키의 자산 분류가 변경되었습니다. 원본을 확인하세요")
     merged["asset_type"] = merged["asset_type_today"].fillna(merged["asset_type_prev"])
 
     merged["비중(%)_today"] = merged["비중(%)_today"].fillna(0)

@@ -18,13 +18,13 @@ TIME 미국나스닥100 액티브 ETF의 공개 구성종목을 직전 정상 �
 
 ## 이메일 구성
 
-- 비교 날짜와 신규 편입·편출·기존 수량 증가·감소 요약
-- 변화한 주식 전체 목록: 10개로 잘라 중요한 종목을 누락하지 않음
-- 데이터 근거, 운용 의도 가설, 포트폴리오 영향, 시나리오, 리스크, 관찰 항목
+- 비교 날짜와 Python이 계산한 간결한 변화 요약
+- 변화한 주식 전체를 하나의 표로 표시: 종목·구분 / 수량 변화 / 현재 비중
+- 해석 노트: 판단 근거, 운용 가설과 대안 설명, 유의점, 다음 확인 조건
 - 현재 TOP10, TOP10 이탈, 보조 지표인 주요 비중 변화 최대 5개
 - 주식 외 자산 변화와 분석 한계
 
-모바일을 고려한 3열 표, 2×2 요약 카드, 이메일용 table 레이아웃을 사용합니다. 종목명과 AI 문장은 HTML 이스케이프합니다. 실제 사용한 AI 제공자와 모델을 메일에 표시합니다. 과거 분석 JSON을 다른 날짜의 메일에 재사용하지 않습니다.
+흰 종이와 짙은 녹색을 사용한 단일 칼럼 리서치 레터입니다. 장식용 카드·그라데이션·과도한 상태 배지를 쓰지 않고 여백과 구분선으로 정보를 나눕니다. 이메일용 table 레이아웃과 모바일 3열 표를 유지하고, 빈 항목은 생략합니다. 종목명과 AI 문장은 HTML 이스케이프하며 실제 AI 모델을 하단에 표시합니다.
 
 메일 상단 사실 요약은 Python 계산 결과만 사용합니다. AI에는 수량 변화 사실 확인표도 요구하며 누락·추가 종목·잘못된 상태나 수량이 있으면 분석을 거부합니다. 이 검산이 자유 서술 전체의 정확성을 보장하지는 않습니다. AI 해석은 참고 가설로 읽고 숫자 표를 우선하세요.
 
@@ -71,7 +71,8 @@ python -m pip install -r requirements.txt
 |---|---|
 | SMTP_USER / SMTP_PASS / TO_EMAIL | Gmail 주소 / 앱 비밀번호 / 수신 주소 |
 | GEMINI_API_KEY | Google AI Studio 키 |
-| GEMINI_MODEL | 기본 `gemini-3.8-flash` |
+| GEMINI_MODEL | 기본 `gemini-4-hydrogen` |
+| GEMINI_THINKING_LEVEL | 기본 `medium`; `low`, `medium`, `high` 중 선택 |
 | GLM_API_KEY | GLM fallback 키 |
 | GLM_MODEL | 기본 `glm-4.7-flash` |
 | GLM_BASE_URL | 기본 `https://open.bigmodel.cn/api/paas/v4` |
@@ -84,9 +85,10 @@ python -m pip install -r requirements.txt
 
 ## AI 모델과 무료 이용
 
-2026-10-02 기준 primary는 **Gemini 3.8 Flash**, fallback은 **GLM-4.7-Flash**입니다. GLM의 더 최신 5.3 계열과 FlashX는 무료 모델이 아닙니다. 무료 모델도 요청 한도와 계정별 이용 권한이 있습니다.
+2026-11-27 기준 primary는 **Gemini 4 Hydrogen**(`gemini-4-hydrogen`)입니다. 공식 문서상 무료 티어를 지원하며 계정별 한도·이용 권한은 별도로 적용됩니다. 기존 무료 fallback **GLM-4.7-Flash** 설정은 유지합니다. 유료 모델로 자동 전환하지 않습니다.
 
-- [Gemini 3.8 Flash 모델](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash)
+- [Gemini 4 Hydrogen 모델과 무료 티어](https://aistudio.google.com/docs/models/gemini-4-hydrogen)
+- [Hydrogen 마이그레이션 안내](https://aistudio.google.com/docs/whats-new-gemini-4-hydrogen#migrate-from-gemini-3-8-flash)
 - [Gemini 가격과 무료 티어](https://ai.google.dev/gemini-api/docs/pricing)
 - [Gemini 요청 한도](https://ai.google.dev/gemini-api/docs/rate-limits)
 - [Z.AI GLM 가격표](https://docs.z.ai/guides/overview/pricing)
@@ -94,6 +96,8 @@ python -m pip install -r requirements.txt
 BigModel 키와 Z.AI 키는 발급 플랫폼에 맞는 주소를 사용해야 합니다. Z.AI에서 발급했다면 `GLM_BASE_URL=https://api.z.ai/api/paas/v4`로 변경하세요. 키를 여러 서버에 보내 보며 자동 탐색하지 않습니다. 선택한 플랫폼의 요금표와 모델 권한도 확인하세요.
 
 Gemini 429/권한/응답 검증 실패는 GLM으로 전환합니다. 일시적인 5xx만 제한적으로 재시도합니다. 두 제공자의 출력은 같은 스키마로 검증하며 잘린 응답은 사용하지 않습니다. 무료 API의 데이터 처리 정책을 확인하고 민감한 자료를 입력하지 마세요.
+
+Hydrogen 요청에는 더 이상 적용되지 않는 temperature/top-p/top-k를 넣지 않습니다. 사고 수준은 medium, 사고·출력 합산 한도는 16,384 토큰으로 제한합니다. 목록 개수나 낙관·비관 시나리오를 억지로 채우게 하지 않으며, 변화가 적은 날은 짧은 분석을 허용합니다.
 
 ## 안전한 수동 점검
 
@@ -119,7 +123,7 @@ python app/manual.py analyze --provider gemini
 python app/manual.py analyze --provider glm
 ```
 
-자동 전환 없이 지정한 제공자만 테스트할 수도 있습니다. 분석 JSON에는 비교 날짜를 함께 저장하고, HTML은 해당 분석 결과로 새로 생성합니다.
+자동 전환 없이 지정한 제공자만 테스트할 수도 있습니다. 분석 JSON에는 비교 날짜와 두 원본의 내용 해시를 함께 저장하고, HTML은 해당 분석 결과로 새로 생성합니다.
 
 다음 명령은 **실제 메일을 발송**합니다. 기본적으로 AI도 새로 호출하며 AI 실패 시 수동 발송은 중단됩니다:
 
@@ -127,6 +131,14 @@ python app/manual.py analyze --provider glm
 python app/manual.py email
 python app/manual.py email --no-ai
 ```
+
+미리 검토한 AI 분석으로 동일한 메일을 보내려면 다음을 사용합니다. 선택한 스냅샷의 날짜·내용 해시와 AI 수량 검산을 모두 다시 확인하며 API를 재호출하지 않습니다:
+
+```powershell
+python app/manual.py email --analysis temp/ai_analysis_preview.json
+```
+
+특정 날짜로 분석했다면 email에도 같은 `--previous`와 `--current`를 지정하세요. 수동 미리보기와 메일에는 예시 표시가 붙고, 발송 후 `temp/last_sample_receipt.json`에 SMTP Message-ID가 기록됩니다. 운영 state는 변경하지 않습니다. SMTP 접수 성공은 수신함 도착을 보장하지는 않습니다.
 
 다운로드만 점검하거나 수동 원본을 가져옵니다:
 

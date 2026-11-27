@@ -73,7 +73,10 @@ DOWNLOAD_MAX_RETRIES = get_int_env(
 )
 
 GEMINI_API_KEY = get_env("GEMINI_API_KEY", required=False)
-GEMINI_MODEL = get_env("GEMINI_MODEL", required=False, default="gemini-3.8-flash")
+GEMINI_MODEL = get_env("GEMINI_MODEL", required=False, default="gemini-4-hydrogen")
+GEMINI_THINKING_LEVEL = get_env("GEMINI_THINKING_LEVEL", required=False, default="medium")
+if GEMINI_THINKING_LEVEL not in {"low", "medium", "high"}:
+    raise RuntimeError("GEMINI_THINKING_LEVEL은 low, medium, high 중 하나여야 합니다")
 GLM_API_KEY = get_env("GLM_API_KEY", required=False)
 GLM_MODEL = get_env("GLM_MODEL", required=False, default="glm-4.7-flash")
 GLM_BASE_URL = get_env(

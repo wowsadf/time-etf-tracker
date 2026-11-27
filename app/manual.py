@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
-from ai_analyzer import analyze_compare_payload
+from ai_analyzer import AnalysisResult, analyze_compare_payload, _validate_quantity_claims
 from compare import compare_holdings
 from config import REPORT_TITLE
 from email_sender import send_html_email
@@ -14,7 +14,7 @@ from holdings_parser import load_holdings_excel
 from logging_utils import setup_logger
 from paths import TEMP_DIR
 from reporter import build_compare_ai_payload, build_compare_report_html, build_compare_report_text
-from snapshot_manager import get_latest_two_snapshot_paths, load_snapshot_df, save_snapshot
+from snapshot_manager import compute_snapshot_hash, get_latest_two_snapshot_paths, load_snapshot_df, save_snapshot
 from validator import validate_holdings
 
 logger = setup_logger()
@@ -29,6 +29,8 @@ def make_parser() -> argparse.ArgumentParser:
         sub.add_argument("--current", type=Path)
         if command in {"preview", "analyze", "email"}:
             sub.add_argument("--provider", choices=["auto", "gemini", "glm"], default="auto")
+        if command in {"preview", "email"}:
+            sub.add_argument("--analysis", type=Path, help="같은 스냅샷 해시로 검증된 기존 분석을 사용; API 재호출 없음")
         if command == "preview":
             sub.add_argument("--ai", action="store_true", help="선택한 두 스냅샷으로 AI를 새로 호출")
         if command == "email":
@@ -38,6 +40,17 @@ def make_parser() -> argparse.ArgumentParser:
     importer.add_argument("--input", type=Path, required=True)
     importer.add_argument("--date", help="YYYY-MM-DD; 생략하면 엑셀 파일명 사용")
     return parser
+
+
+def load_saved_analysis(path: Path, labels: dict, fingerprints: dict, payload: dict) -> dict:
+    if path.stat().st_size > 512_000:
+        raise ValueError("분석 파일이 너무 큽니다")
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    if saved.get("comparison") != labels or saved.get("fingerprints") != fingerprints:
+        raise ValueError("분석의 비교 날짜 또는 스냅샷 내용이 선택한 파일과 다릅니다")
+    analysis = saved["analysis"]
+    validated = _validate_quantity_claims(AnalysisResult.model_validate(analysis), payload)
+    return {**validated.model_dump(), "provider": str(analysis["provider"]), "model": str(analysis["model"])}
 
 
 def main() -> None:
@@ -65,6 +78,7 @@ def main() -> None:
     validate_holdings(current_df)
     compared = compare_holdings(current_df, prev_df)
     labels = {"previous_label": previous.stem, "current_label": current.stem}
+    fingerprints = {"previous": compute_snapshot_hash(prev_df), "current": compute_snapshot_hash(current_df)}
     logger.info("[MANUAL] comparing %s -> %s", previous.name, current.name)
     if args.command == "compare":
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -76,27 +90,38 @@ def main() -> None:
                 (args.command == "email" and not args.no_ai) or
                 (args.command == "preview" and args.ai))
     analysis = None
-    if wants_ai:
+    saved_analysis_path = getattr(args, "analysis", None)
+    if saved_analysis_path and args.command == "email" and args.no_ai:
+        parser.error("--analysis와 --no-ai는 함께 사용할 수 없습니다")
+    if saved_analysis_path:
+        payload = build_compare_ai_payload(compared, **labels)
+        analysis = load_saved_analysis(saved_analysis_path, labels, fingerprints, payload)
+        if args.provider != "auto" and analysis["provider"].lower() != args.provider:
+            parser.error("저장된 분석의 제공자가 --provider와 다릅니다")
+    elif wants_ai:
         payload = build_compare_ai_payload(compared, **labels)
         analysis = analyze_compare_payload(payload, provider=args.provider)
         logger.info("[MANUAL] AI validated: %s / %s", analysis["provider"], analysis["model"])
-    body = build_compare_report_html(compared, ai_analysis=analysis, **labels)
-    if args.command == "email":
-        send_html_email(
-            subject=f"[ETF 테스트] {REPORT_TITLE} | {previous.stem} → {current.stem}",
-            html_body=body,
-            text_body=build_compare_report_text(compared, ai_analysis=analysis, **labels),
-        )
-        return
+    body = build_compare_report_html(compared, ai_analysis=analysis, sample=True, **labels)
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
     target = TEMP_DIR / "report_preview.html"
     target.write_text(body, encoding="utf-8")
     if analysis:
         (TEMP_DIR / "ai_analysis_preview.json").write_text(
-            json.dumps({"comparison": labels, "analysis": analysis}, ensure_ascii=False, indent=2),
+            json.dumps({"comparison": labels, "fingerprints": fingerprints, "analysis": analysis}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
     logger.info("[MANUAL] HTML preview: %s", target)
+    if args.command == "email":
+        message_id = send_html_email(
+            subject=f"[ETF 테스트] {REPORT_TITLE} | {previous.stem} → {current.stem}",
+            html_body=body,
+            text_body=build_compare_report_text(compared, ai_analysis=analysis, sample=True, **labels),
+        )
+        (TEMP_DIR / "last_sample_receipt.json").write_text(
+            json.dumps({"message_id": message_id, "comparison": labels, "fingerprints": fingerprints}, indent=2), encoding="utf-8",
+        )
+        return
 
 
 if __name__ == "__main__":

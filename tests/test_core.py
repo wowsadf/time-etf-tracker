@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 from uuid import uuid4
+from types import SimpleNamespace
 
 import pandas as pd
 
@@ -22,10 +23,12 @@ import state_manager  # noqa: E402
 import run_tracker_once  # noqa: E402
 import ai_analyzer  # noqa: E402
 import fetcher  # noqa: E402
+import manual  # noqa: E402
+import email_sender  # noqa: E402
 from compare import compare_holdings, add_rank  # noqa: E402
 from exceptions import StateCorruptionError, DataNotReadyError  # noqa: E402
 from holdings_parser import load_holdings_excel  # noqa: E402
-from reporter import build_compare_report_html, build_compare_ai_payload  # noqa: E402
+from reporter import build_compare_report_html, build_compare_report_text, build_compare_ai_payload  # noqa: E402
 from validator import validate_holdings  # noqa: E402
 
 
@@ -52,17 +55,13 @@ def valid_df() -> pd.DataFrame:
 
 
 def valid_analysis() -> dict:
-    scenario = {"thesis": "가설", "confidence": "low", "implications": ["확인"] * 3}
     return {
         "quantity_claims": [],
         "one_line_take": "확인이 필요한 변화입니다.", "core_view": "해석", "manager_intent": "가설",
-        "what_changed_in_plain_english": ["변화"] * 4,
-        "evidence_based_observations": ["근거"] * 5,
-        "portfolio_implications": ["영향"] * 4,
-        "base_case": scenario, "bull_case": scenario, "bear_case": scenario,
-        "key_risks": [{"level": "low", "issue": "위험", "evidence": "근거"}] * 4,
-        "what_to_watch_next": ["확인"] * 5,
-        "watchlist": [{"name": "관찰", "direction": "neutral", "reason": "근거", "next_check": "확인"}] * 5,
+        "evidence_based_observations": ["근거"],
+        "portfolio_implications": ["영향"],
+        "key_risks": [{"level": "low", "issue": "위험", "evidence": "근거"}],
+        "what_to_watch_next": ["확인"],
         "data_limitations": ["한계"] * 2,
     }
 
@@ -81,6 +80,24 @@ def workspace_temp_dir():
 
 
 class CompareHoldingsTests(unittest.TestCase):
+    def test_numeric_strings_rank_numerically(self) -> None:
+        data = valid_df()
+        data["비중(%)"] = ["9.0", "10.0"] + ["1.0"] * 8
+        result = compare_holdings(data, data).set_index("asset_key")
+        self.assertEqual(result.loc["S1 US EQUITY", "rank_today"], 1)
+
+    def test_missing_numeric_value_is_not_filled_as_zero(self) -> None:
+        data = valid_df()
+        data.loc[0, "수량"] = float("nan")
+        with self.assertRaises(ValueError):
+            compare_holdings(data, data)
+
+    def test_asset_type_change_requires_review(self) -> None:
+        old, current = valid_df(), valid_df()
+        current.loc[0, "asset_type"] = "cash"
+        with self.assertRaisesRegex(ValueError, "자산 분류"):
+            compare_holdings(current, old)
+
     def test_equal_weights_have_stable_ranks(self) -> None:
         first = add_rank(valid_df()).set_index("asset_key")["rank"]
         second = add_rank(valid_df().iloc[::-1]).set_index("asset_key")["rank"]
@@ -140,6 +157,15 @@ class CompareHoldingsTests(unittest.TestCase):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_duplicate_excel_headers_are_rejected(self) -> None:
+        with workspace_temp_dir() as temp_dir:
+            data = valid_df().drop(columns=["asset_key", "asset_type"])
+            data = pd.concat([data, data[["수량"]]], axis=1)
+            path = temp_dir / "duplicate.xlsx"
+            data.to_excel(path, index=False)
+            with self.assertRaisesRegex(ValueError, "중복"):
+                load_holdings_excel(path)
+
     def test_missing_key_or_asset_type_is_rejected(self) -> None:
         for column in ["asset_key", "asset_type"]:
             with self.subTest(column=column):
@@ -191,6 +217,14 @@ class ValidationTests(unittest.TestCase):
 
 
 class SnapshotManagerTests(unittest.TestCase):
+    def test_text_key_na_is_not_interpreted_as_missing(self) -> None:
+        with workspace_temp_dir() as temp_dir:
+            data = valid_df()
+            data.loc[0, "asset_key"] = "NA"
+            path = temp_dir / "data.csv"
+            data.to_csv(path, index=False, encoding="utf-8-sig")
+            self.assertEqual(snapshot_manager.load_snapshot_df(path).loc[0, "asset_key"], "NA")
+
     def test_hash_ignores_row_order_and_numeric_dtype(self) -> None:
         first = valid_df()
         second = first.iloc[::-1].copy()
@@ -404,10 +438,11 @@ class ReporterTests(unittest.TestCase):
 
         report = build_compare_report_html(compared, ai_analysis=ai_analysis)
 
-        self.assertIn("AI 상세 분석", report)
-        self.assertIn("데이터로 확인된 근거", report)
-        self.assertIn("포트폴리오 영향", report)
+        self.assertIn("해석 노트", report)
+        self.assertIn("판단의 근거", report)
+        self.assertIn("운용 관점", report)
         self.assertIn("분석 한계", report)
+        self.assertNotIn("낙관 시나리오", report)
 
     def test_html_escapes_names_and_ai_text(self) -> None:
         data = valid_df()
@@ -430,8 +465,29 @@ class ReporterTests(unittest.TestCase):
         current["수량"] += 1
         report = build_compare_report_html(compare_holdings(current, data))
         for name in data["종목명"]:
-            self.assertIn(f">{name}</", report)
-        self.assertIn("수량 증가 · 20종목", report)
+            self.assertIn(name, report)
+        self.assertIn("주식 20종목의 보유 내역", report)
+
+    def test_editorial_layout_has_no_decorative_dashboard_cards(self) -> None:
+        data = valid_df()
+        result = compare_holdings(data, data)
+        report = build_compare_report_html(result, sample=True, previous_label="2026-01-01", current_label="2026-01-02")
+        self.assertIn("디자인 확인용 예시", report)
+        self.assertIn("2026-01-01 → 2026-01-02", report)
+        self.assertNotIn("border-radius", report)
+        self.assertNotIn("box-shadow", report)
+        self.assertNotIn("PORTFOLIO MONITOR", report)
+        self.assertIn("예시 메일", build_compare_report_text(result, sample=True))
+
+    def test_html_and_plain_text_show_same_ai_and_date(self) -> None:
+        data = valid_df()
+        compared = compare_holdings(data, data)
+        analysis = {**valid_analysis(), "provider": "Gemini", "model": "gemini-4-hydrogen"}
+        labels = {"previous_label": "2026-01-01", "current_label": "2026-01-02"}
+        for output in [build_compare_report_html(compared, ai_analysis=analysis, **labels), build_compare_report_text(compared, ai_analysis=analysis, **labels)]:
+            self.assertIn("gemini-4-hydrogen", output)
+            self.assertIn("2026-01-01 → 2026-01-02", output)
+            self.assertIn(analysis["core_view"], output)
 
     def test_payload_includes_dates_and_proportional_quantity_signal(self) -> None:
         data = valid_df()
@@ -443,6 +499,31 @@ class ReporterTests(unittest.TestCase):
 
 
 class AIProviderTests(unittest.TestCase):
+    def test_hydrogen_request_uses_declared_schema_without_temperature(self) -> None:
+        client = MagicMock()
+        client.models.generate_content.return_value = SimpleNamespace(
+            parsed=valid_analysis(), candidates=[SimpleNamespace(finish_reason=ai_analyzer.types.FinishReason.STOP)],
+        )
+        with patch.object(ai_analyzer, "GEMINI_THINKING_LEVEL", "medium"):
+            ai_analyzer._call_gemini_once(client, "gemini-4-hydrogen", {})
+        config = client.models.generate_content.call_args.kwargs["config"]
+        self.assertIsNone(config.temperature)
+        self.assertEqual(config.thinking_config.thinking_level.value.lower(), "medium")
+        self.assertEqual(config.max_output_tokens, 16384)
+
+    def test_gemini_truncated_output_is_not_accepted_even_if_parsed(self) -> None:
+        client = MagicMock()
+        client.models.generate_content.return_value = SimpleNamespace(
+            parsed=valid_analysis(), candidates=[SimpleNamespace(finish_reason=ai_analyzer.types.FinishReason.MAX_TOKENS)],
+        )
+        with self.assertRaisesRegex(ValueError, "끝까지"):
+            ai_analyzer._call_gemini_once(client, "gemini-4-hydrogen", {})
+
+    def test_quiet_day_does_not_require_filler_lists(self) -> None:
+        analysis = valid_analysis()
+        analysis.update(evidence_based_observations=[], portfolio_implications=[], manager_intent="", key_risks=[], what_to_watch_next=[])
+        self.assertIsNotNone(ai_analyzer.AnalysisResult.model_validate(analysis))
+
     def test_correct_quantity_fact_claims_pass(self) -> None:
         analysis = valid_analysis()
         analysis["quantity_claims"] = [{"asset_key": "A", "quantity_status": "bought", "previous_quantity": 10, "current_quantity": 11}]
@@ -518,6 +599,36 @@ class FetcherTests(unittest.TestCase):
                     fetcher.download_excel_with_retry(path, max_retries=1)
             self.assertEqual(path.read_bytes(), b"original")
             self.assertEqual(list(temp_dir.glob("*.tmp")), [])
+
+
+class ManualPreviewTests(unittest.TestCase):
+    def test_saved_analysis_requires_exact_fingerprints(self) -> None:
+        with workspace_temp_dir() as temp_dir:
+            path = temp_dir / "analysis.json"
+            labels = {"previous_label": "before", "current_label": "after"}
+            fingerprints = {"previous": "a", "current": "b"}
+            saved = {"comparison": labels, "fingerprints": fingerprints,
+                     "analysis": {**valid_analysis(), "provider": "Gemini", "model": "gemini-4-hydrogen"}}
+            path.write_text(json.dumps(saved), encoding="utf-8")
+            self.assertEqual(manual.load_saved_analysis(path, labels, fingerprints, {})["provider"], "Gemini")
+            with self.assertRaisesRegex(ValueError, "내용"):
+                manual.load_saved_analysis(path, labels, {"previous": "a", "current": "changed"}, {})
+
+
+class EmailSenderTests(unittest.TestCase):
+    def test_multipart_message_contains_html_and_plain_text(self) -> None:
+        with (
+            patch.object(email_sender, "SMTP_USER", "sender@example.com"),
+            patch.object(email_sender, "SMTP_PASS", "test-password"),
+            patch.object(email_sender, "TO_EMAIL", "recipient@example.com"),
+            patch.object(email_sender.smtplib, "SMTP") as smtp,
+        ):
+            message_id = email_sender.send_html_email("Report", "<p>HTML</p>", "Plain text")
+        arguments = smtp.return_value.__enter__.return_value.sendmail.call_args.args
+        self.assertIn("multipart/alternative", arguments[2])
+        self.assertIn("TIME ETF", arguments[2])
+        self.assertIn(message_id, arguments[2])
+        self.assertNotIn("test-password", arguments[2])
 
 
 if __name__ == "__main__":

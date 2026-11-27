@@ -33,6 +33,12 @@ def detect_header_row(file_path: Path, max_scan_rows: int = 10) -> int:
             best_score = score
             best_row = idx
 
+    if best_score != len(REQUIRED_COLUMNS):
+        raise ValueError("구성종목 필수 헤더를 찾을 수 없습니다")
+    header_values = [normalize_text(value) for value in preview.loc[best_row]]
+    if any(header_values.count(name) > 1 for name in REQUIRED_COLUMNS):
+        raise ValueError("필수 헤더가 중복되어 있습니다")
+
     logger.info(f"[PARSE] detected header row={best_row}")
     return best_row
 
@@ -71,7 +77,10 @@ def load_holdings_excel(file_path: Path) -> pd.DataFrame:
     df = pd.read_excel(file_path, header=header_row)
 
     df.columns = [normalize_text(c) for c in df.columns]
+    if df.columns.duplicated().any():
+        raise ValueError("정규화 후 중복된 컬럼명이 있습니다")
     validate_required_columns(df)
+    df[REQUIRED_COLUMNS] = df[REQUIRED_COLUMNS].replace(r"^\s*$", pd.NA, regex=True)
     # 정규화 전에 완전히 빈 행만 제거한다. 일부 값만 없는 행을 숨기면 안 된다.
     df = df.dropna(subset=REQUIRED_COLUMNS, how="all").copy()
 
